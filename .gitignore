@@ -1,3 +1,15 @@
+venv/
+__pycache__/
+*.pyc
+dist/
+build/
+*.spec
+.env
+logs/
+screenshots/
+IntelliDesk.exe
+IntelliDeskInstaller.exe
+
 # Virtual Environment
 venv/
 
@@ -14,3 +26,4 @@ __pycache__/
 # OS files
 .DS_Store
 Thumbs.db
+history.json

@@ -4,6 +4,9 @@ from tkinter import ttk
 
 from core.ai_engine import interpret_command
 from core.action_engine import execute_actions
+from core.voice_controller import DEFAULT_VOICE_CONTROLLER
+from core.tts_controller import DEFAULT_TTS_CONTROLLER
+from utils import settings
 from gui.pages import (
     make_sidebar,
     home_page,
@@ -17,6 +20,15 @@ from gui.pages import (
     about_page,
 )
 from core.history import add_entry
+
+
+def _safe_tts(text: str):
+    try:
+        cfg = settings.load_settings()
+        if cfg.get('voice_response', True):
+            DEFAULT_TTS_CONTROLLER.speak(text)
+    except Exception:
+        pass
 
 
 def start_app():
@@ -40,12 +52,19 @@ def start_app():
     main = tk.Frame(container, bg='#252525')
     main.pack(side='left', fill='both', expand=True)
 
-    # Command area
     label = tk.Label(main, text='What would you like me to do?', font=("Arial", 14), fg='white', bg='#252525')
     label.pack(pady=6)
 
     prompt_box = tk.Text(main, width=90, height=6, font=("Arial", 12))
     prompt_box.pack(pady=6)
+
+    voice_status_var = tk.StringVar(value="Voice: Idle")
+    voice_status = tk.Label(main, textvariable=voice_status_var, fg='white', bg='#252525', font=('Arial', 11, 'bold'))
+    voice_status.pack(pady=(0, 8))
+
+    transcript_var = tk.StringVar(value="Recognized text: -")
+    recognized_label = tk.Label(main, textvariable=transcript_var, fg='white', bg='#252525', wraplength=900)
+    recognized_label.pack(pady=(0, 10))
 
     def show_response(text):
         response_box.config(state=tk.NORMAL)
@@ -59,23 +78,47 @@ def start_app():
         response_box.see(tk.END)
         response_box.config(state=tk.DISABLED)
 
+    def handle_voice_result(text, state):
+        if state == 'result':
+            transcript_var.set(f"Recognized text: {text}")
+            prompt_box.delete("1.0", tk.END)
+            prompt_box.insert(tk.END, text)
+            voice_status_var.set("Voice: Recognized")
+            root.after(0, run_prompt)
+        elif state == 'no_speech':
+            transcript_var.set('Recognized text: No speech detected')
+            voice_status_var.set('Voice: No speech detected')
+        elif state == 'unavailable':
+            transcript_var.set('Recognized text: microphone unavailable')
+            voice_status_var.set('Voice: Unavailable')
+        elif state == 'error':
+            transcript_var.set(f'Recognized text: {text}')
+            voice_status_var.set('Voice: Error')
+
+    def start_voice_input():
+        if not DEFAULT_VOICE_CONTROLLER.is_available():
+            voice_status_var.set('Voice: Microphone unavailable')
+            transcript_var.set('Recognized text: microphone unavailable')
+            return
+        voice_status_var.set('Voice: Listening...')
+        DEFAULT_VOICE_CONTROLLER.start_listening(callback=handle_voice_result)
+
+    def stop_voice_input():
+        DEFAULT_VOICE_CONTROLLER.stop_listening()
+        voice_status_var.set('Voice: Stopped')
+
     def run_prompt():
         prompt = prompt_box.get("1.0", tk.END).strip()
-        print("User Prompt:", prompt)
         if not prompt:
             show_response("Please enter a command.")
             return
 
-        # Show COMMAND and clear previous
         show_response("")
-
         command_label.config(text=f"COMMAND: {prompt}")
         understanding_label.config(text="UNDERSTANDING: Parsing...")
         actions_label.config(text="ACTIONS: -")
         status_label.config(text="STATUS: Running")
-
         run_button.config(state=tk.DISABLED)
-
 
         try:
             actions, note = interpret_command(prompt)
@@ -97,11 +140,10 @@ def start_app():
             run_button.config(state=tk.NORMAL)
             return
 
-        # Show parsed actions summary
         summary_lines = [f"Planned action: {a.get('action')} { {k:v for k,v in a.items() if k!='action'} }" for a in actions]
         actions_label.config(text="ACTIONS: " + "; ".join([a.get('action') for a in actions]))
         show_response("\n".join(summary_lines) + "\n\nExecuting...\n")
-        # If any action looks like form automation or upload, require review
+
         form_actions = any(a.get('action') in ('upload_file',) or 'field' in a or 'label' in a for a in actions)
         if form_actions:
             confirmed = {'ok': False}
@@ -134,26 +176,24 @@ def start_app():
 
         def worker():
             def feedback_cb(msg: str):
-                # marshal into the Tkinter main thread
                 root.after(0, append_response, msg)
             status = 'completed'
             try:
-                # clear any previous stop request
                 try:
                     from core.action_engine import clear_stop_request
                     clear_stop_request()
                 except Exception:
                     pass
                 execute_actions(actions, feedback=feedback_cb)
-                root.after(0, append_response, "All actions completed.")
+                root.after(0, append_response, 'All actions completed.')
+                root.after(0, _safe_tts, 'Task completed successfully.')
             except Exception as exc:
                 status = 'failed'
-                root.after(0, append_response, f"Execution error: {exc}")
+                root.after(0, append_response, f'Execution error: {exc}')
             finally:
-                # save to history (safe fields only)
                 try:
                     safe_actions = [{k:v for k,v in a.items() if k not in ('path','url')} for a in actions]
-                    add_entry(prompt, safe_actions, 'See responses', status)
+                    add_entry(prompt, safe_actions, 'See responses', status, input_type='Text', intent='unknown', confidence=0.0, task_plan=actions)
                 except Exception:
                     pass
                 root.after(0, status_label.config, {'text': f'STATUS: {status}'})
@@ -162,8 +202,12 @@ def start_app():
         threading.Thread(target=worker, daemon=True).start()
 
     controls = tk.Frame(main, bg='#252525')
-    run_button = tk.Button(controls, text="Run", font=("Arial", 12), width=15, command=run_prompt)
+    run_button = tk.Button(controls, text='Run', font=('Arial', 12), width=15, command=run_prompt)
     run_button.pack(side='left', padx=6)
+    voice_button = tk.Button(controls, text='🎤 Start Listening', font=('Arial', 12), width=18, command=start_voice_input)
+    voice_button.pack(side='left', padx=6)
+    stop_voice_button = tk.Button(controls, text='Stop Listening', font=('Arial', 12), width=15, command=stop_voice_input)
+    stop_voice_button.pack(side='left', padx=6)
     command_label = tk.Label(controls, text='COMMAND:', fg='white', bg='#252525')
     command_label.pack(side='left', padx=6)
     understanding_label = tk.Label(controls, text='UNDERSTANDING:', fg='white', bg='#252525')
@@ -174,10 +218,9 @@ def start_app():
     status_label.pack(side='left', padx=6)
     controls.pack(pady=10)
 
-    response_box = tk.Text(main, width=90, height=12, font=("Arial", 12), bg="#2e2e2e", fg="white", state=tk.DISABLED)
+    response_box = tk.Text(main, width=90, height=12, font=('Arial', 12), bg='#2e2e2e', fg='white', state=tk.DISABLED)
     response_box.pack(pady=10)
 
-    # Pages area
     pages_frame = tk.Frame(main, bg='#252525')
     pages_frame.pack(fill='both', expand=True)
 

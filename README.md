@@ -2,40 +2,61 @@
 
 IntelliDesk AI is an AI-powered desktop automation assistant for Windows.
 
-This repository contains the development source. Use `app.py` to run from source.
-
-Features:
-- Natural-language command parsing (OpenAI + rule fallback)
-- Desktop automation (Notepad, Calculator, Chrome, VS Code)
-- Typing, key presses, hotkeys
-- Screenshot capture (saved to `screenshots/`)
-- Safety validation and allowlist
-
-Build to Windows executable using PyInstaller (see `build_exe.bat`).
-# IntelliDesk
-
-IntelliDesk is an AI-powered desktop assistant designed to automate computer tasks through natural language voice and text commands. It combines intent understanding, task planning, and desktop automation to help users perform actions like opening applications, managing files, and executing multi-step workflows.
+This project implements Phase 6 of IntelliDesk: an AI/ML-driven automation MVP with natural language intent understanding, structured task planning, safe execution, browser automation, form handling, voice/STT architecture, and GUI integration.
 
 ## Project Overview
 
-IntelliDesk acts as an intelligent personal computer agent that can:
-- Interpret user goals using natural language
-- Plan and decompose multi-step tasks into actionable steps
-- Execute selected desktop operations safely
-- Request user confirmation for sensitive actions
-- Provide a foundation for future extensions such as memory, computer vision, and enterprise integrations
+IntelliDesk acts as an intelligent desktop agent that can:
+- Interpret natural language commands using ML and LLM planning
+- Classify intent and create structured action plans
+- Execute multi-step desktop and browser workflows safely
+- Detect and fill non-sensitive web form fields
+- Use voice input and optional text-to-speech responses
+- Maintain execution history, screenshots, and settings
+- Validate all actions through a safety allowlist
 
 ## Current Implementation
 
-The current repository includes a lightweight Tkinter GUI shell in `gui/main_window.py` and the application entrypoint in `app.py`. The interface accepts prompt input and is ready to be extended with AI and automation backend logic.
+This repository implements the Phase 6 MVP in full, including:
+- AI intent understanding with a local ML classifier and rule-based fallback
+- Structured task planning via `core/task_planner.py`
+- LLM-based JSON planning fallback in `core/ai_engine.py`
+- Multi-step browser and desktop task execution
+- Desktop automation primitives and safe action execution
+- Browser automation with Playwright in `core/playwright_controller.py`
+- Web form detection and safe, non-sensitive form filling
+- Voice input architecture in `core/voice_controller.py`
+- Optional TTS architecture support in `core/tts_controller.py`
+- Task progress and cancel/stop support in `core/action_engine.py`
+- History tracking and UI integration
+- Screenshot capture and viewer integration
+- Settings management and API configuration
 
 ## Getting Started
 
 1. Install Python 3.11+.
-2. Run the application:
+2. Install dependencies using the provided requirements file:
 
-```bash
-python app.py
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+3. Install Playwright browsers if you want browser automation:
+
+```powershell
+.venv\Scripts\python.exe -m playwright install
+```
+
+4. Create a `.env` file in the project root with your OpenAI API key:
+
+```text
+OPENAI_API_KEY=sk-...
+```
+
+5. Run the application:
+
+```powershell
+.venv\Scripts\python.exe app.py
 ```
 
 ## Project Structure
@@ -97,8 +118,31 @@ python app.py
 
 - All AI-produced actions are validated against an allowlist (`core/safety.py`).
 - Forbidden keywords like `powershell`, `cmd`, `shutdown` are blocked.
-- No automatic shell execution, file deletion, registry edits, or system shutdown.
-- Form submissions for sensitive forms are never automated.
+- No automatic arbitrary shell execution or unrestricted PowerShell/CMD execution.
+- No destructive system commands, file deletion, or registry edits are allowed.
+- Sensitive form fields are never auto-submitted.
+
+## Testing
+
+Run the Phase 6 validation suite using the project virtual environment:
+
+```powershell
+.venv\Scripts\python.exe -m pytest -q
+```
+
+Then verify compilation:
+
+```powershell
+.venv\Scripts\python.exe -m compileall core gui utils app.py
+```
+
+## Current Limitations
+
+- Browser automation requires Playwright browser runtimes installed.
+- Voice/STT depends on available microphone hardware and `speechrecognition` support.
+- OpenAI LLM planning requires a valid `.env` `OPENAI_API_KEY`.
+- Form automation is safe for ordinary non-sensitive fields only; sensitive fields are blocked.
+- The app is an MVP and not production hardened.
 
 ## Build artifacts (created during this session)
 

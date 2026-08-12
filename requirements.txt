@@ -5,3 +5,7 @@ pygetwindow
 psutil
 playwright
 Pillow
+scikit-learn
+speechrecognition
+pyttsx3
+pytest

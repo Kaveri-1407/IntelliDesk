@@ -33,10 +33,14 @@ def save_history(entry: Dict):
         json.dump(hs, f, indent=2)
 
 
-def add_entry(command: str, actions: List[Dict], result: str, status: str):
+def add_entry(command: str, actions: List[Dict], result: str, status: str, input_type: str = 'Text', intent: str = None, confidence: float = None, task_plan: List[Dict] = None):
     entry = {
         'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'input_type': input_type,
         'command': command,
+        'intent': intent,
+        'confidence': confidence,
+        'task_plan': task_plan or actions,
         'actions': actions,
         'result': result,
         'status': status

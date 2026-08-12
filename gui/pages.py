@@ -49,8 +49,12 @@ def history_page(parent):
     listbox = tk.Listbox(f, bg='#2b2b2b', fg='white', width=100)
     listbox.pack(padx=10, pady=6, fill='both', expand=True)
 
+    displayed_items = []
+
     def load(query: str = None):
+        nonlocal displayed_items
         listbox.delete(0, 'end')
+        displayed_items = []
         for e in load_history():
             ts = e.get('timestamp')
             cmd = e.get('command')
@@ -59,8 +63,10 @@ def history_page(parent):
             if query:
                 if query.lower() in line.lower():
                     listbox.insert('end', line)
+                    displayed_items.append(e)
             else:
                 listbox.insert('end', line)
+                displayed_items.append(e)
 
     def clear():
         if messagebox.askyesno('Clear History', 'Clear all history? This action cannot be undone.'):
@@ -72,11 +78,9 @@ def history_page(parent):
         if not sel:
             return
         idx = sel[0]
-        # Load history and show selected item details
-        items = load_history()
-        if idx >= len(items):
+        if idx >= len(displayed_items):
             return
-        item = items[idx]
+        item = displayed_items[idx]
         detail = tk.Toplevel(f)
         detail.title('History Detail')
         txt = tk.Text(detail, width=100, height=30)
@@ -165,6 +169,9 @@ def settings_page(parent):
     status = 'Configured' if config.OPENAI_API_KEY else 'Missing'
     tk.Label(f, text=f'API Status: {status}', fg='white', bg='#1e1e1e', font=('Arial', 12)).pack(anchor='w', padx=10, pady=4)
 
+    voice_var = tk.BooleanVar(value=bool(s.get('voice_assistant', True)))
+    tts_var = tk.BooleanVar(value=bool(s.get('voice_response', True)))
+
     tk.Label(f, text='Model:', fg='white', bg='#1e1e1e').pack(anchor='w', padx=10)
     model_entry = tk.Entry(f)
     model_entry.insert(0, s.get('model'))
@@ -180,6 +187,13 @@ def settings_page(parent):
     ss_entry.insert(0, s.get('screenshot_dir'))
     ss_entry.pack(anchor='w', padx=10)
 
+    tk.Checkbutton(f, text='Voice Assistant: ON', variable=voice_var, bg='#1e1e1e', fg='white', selectcolor='#2a2a2a', activebackground='#1e1e1e', activeforeground='white').pack(anchor='w', padx=10, pady=4)
+    tk.Checkbutton(f, text='Voice Response: ON', variable=tts_var, bg='#1e1e1e', fg='white', selectcolor='#2a2a2a', activebackground='#1e1e1e', activeforeground='white').pack(anchor='w', padx=10, pady=4)
+    tk.Label(f, text=f'Microphone: {"Available" if __import__("core.voice_controller", fromlist=["DEFAULT_VOICE_CONTROLLER"]).DEFAULT_VOICE_CONTROLLER.is_available() else "Unavailable"}', fg='white', bg='#1e1e1e').pack(anchor='w', padx=10, pady=2)
+    tk.Label(f, text='Speech Recognition: Available / Unavailable', fg='white', bg='#1e1e1e').pack(anchor='w', padx=10, pady=2)
+    tk.Label(f, text=f'ML Model: {"Loaded" if __import__("core.ml_intent", fromlist=["DEFAULT_INTENT_CLASSIFIER"]).DEFAULT_INTENT_CLASSIFIER.predict_with_confidence("open notepad")[0] else "Not loaded"}', fg='white', bg='#1e1e1e').pack(anchor='w', padx=10, pady=2)
+    tk.Label(f, text='LLM: Configured / Missing', fg='white', bg='#1e1e1e').pack(anchor='w', padx=10, pady=2)
+
     def save():
         new = {
             'model': model_entry.get().strip() or s.get('model'),
@@ -187,7 +201,9 @@ def settings_page(parent):
             'screenshot_dir': ss_entry.get().strip() or s.get('screenshot_dir'),
             'safety_mode': s.get('safety_mode'),
             'theme': s.get('theme'),
-            'version': s.get('version')
+            'version': s.get('version'),
+            'voice_assistant': bool(voice_var.get()),
+            'voice_response': bool(tts_var.get()),
         }
         settings.save_settings(new)
         messagebox.showinfo('Settings', 'Settings saved. Restart app to apply certain changes.')

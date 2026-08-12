@@ -21,7 +21,7 @@ _context = None
 _page = None
 _current_browser_name = None
 
-SAFE_URL_SCHEMES = {'http', 'https'}
+SAFE_URL_SCHEMES = {'http', 'https', 'file'}
 SENSITIVE_FIELD_KEYWORDS = [
     'password', 'pwd', 'pin', 'otp', 'one time', 'ssn', 'cvv', 'card', 'bank', 'account',
     'security', 'secret', 'authentication', 'token', 'credit', 'debit', 'cvc', 'cvv2'
@@ -284,6 +284,28 @@ def detect_form_fields(url: str) -> List[Dict[str, Any]]:
         except Exception:
             continue
     return fields
+
+
+def fill_field_by_label(url: str, label: str, value: str) -> str:
+    """Helper used by tests to fill a field by its visible label text."""
+    if not _playwright_available:
+        return 'Playwright not installed.'
+    try:
+        target = _normalize_url(url)
+        open_url(target)
+        page = _get_page()
+        control = _find_control(label)
+        if not control:
+            return f'Could not find field matching label: {label}'
+        field_type = _field_type(control)
+        if field_type in ('checkbox', 'radio'):
+            return f'Field {label} is not a plain text field. Use checkbox or radio controls.'
+        if field_type == 'select':
+            return f'Field {label} is a dropdown. Use select_option instead.'
+        control.fill(value)
+        return f'Filled field labeled: {label}'
+    except Exception as exc:
+        return f'Failed to fill field {label}: {exc}'
 
 
 def fill_safe_field(field_name: str, value: str) -> str:

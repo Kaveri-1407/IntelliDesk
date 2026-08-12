@@ -9,7 +9,9 @@ DEFAULTS = {
     'screenshot_dir': str(Path(__file__).resolve().parents[1] / 'screenshots'),
     'safety_mode': 'strict',
     'theme': 'dark',
-    'version': '0.1'
+    'version': '0.1',
+    'voice_assistant': True,
+    'voice_response': True,
 }
 
 

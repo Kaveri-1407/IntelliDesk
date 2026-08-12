@@ -1,71 +1,108 @@
 import json
-import openai
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Optional
 
 from utils.openai_client import get_openai_api_key
 from core.command_parser import parse_command as rule_parse
+from core.ml_intent import IntentClassifier
+from core.task_planner import TaskPlanner
+from core import safety
+
+
+def classify_intent(text: str) -> Tuple[str, float]:
+    classifier = IntentClassifier()
+    classifier.train()
+    return classifier.predict_with_confidence(text or '')
+
+
+def _normalize_llm_actions(raw_actions):
+    if isinstance(raw_actions, dict):
+        raw_actions = raw_actions.get('actions', [])
+    if not isinstance(raw_actions, list):
+        return []
+
+    normalized = []
+    for item in raw_actions:
+        if not isinstance(item, dict):
+            continue
+        action = item.get('type') or item.get('action')
+        if not action:
+            continue
+        record = {'action': action}
+        for key, value in item.items():
+            if key not in {'type', 'action'}:
+                record[key] = value
+        normalized.append(record)
+    return normalized
+
+
+def _llm_plan(text: str) -> Optional[List[Dict]]:
+    try:
+        key = get_openai_api_key()
+    except Exception:
+        return None
+
+    try:
+        import openai
+        openai.api_key = key
+                
+        system = (
+            'You are an assistant that converts a single desktop command into structured JSON only. '
+            'Return a JSON object with keys: task and actions. Each action must be an object with a "type" field and optional fields: name, text, key, url, query, path, seconds, field, value. '
+            'Allowed action types: launch_application, open_browser, open_url, search_web, type_text, press_key, hotkey, take_screenshot, wait, close_application, focus_window, fill_safe_field, submit_form, close_browser. '
+            'Do not output any commentary outside the JSON object.'
+        )
+        user = f'Command: {text}\n\nRespond with JSON only.'
+
+        if hasattr(openai, 'ChatCompletion'):
+            resp = openai.ChatCompletion.create(
+                model='gpt-3.5-turbo',
+                messages=[{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
+                temperature=0.0,
+                max_tokens=300,
+            )
+            content = resp.choices[0].message['content'].strip()
+        else:
+            resp = openai.chat.completions.create(
+                model='gpt-4o-mini',
+                messages=[{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
+                temperature=0.0,
+                max_tokens=300,
+            )
+            content = resp.choices[0].message.content.strip()
+
+        parsed = json.loads(content)
+        actions = _normalize_llm_actions(parsed)
+        if actions:
+            return actions
+        return None
+    except Exception:
+        return None
 
 
 def interpret_command(text: str) -> Tuple[List[Dict], str]:
-    """Interpret a natural-language command using OpenAI, falling back to rule-based parser.
-
-    Returns a tuple: (actions_list, note). `note` is empty on successful AI parse,
-    otherwise contains a message explaining the fallback or error.
-    """
+    """Interpret natural language using the ML model and a safe planner. Fall back to the rule parser when necessary."""
     if not text or not text.strip():
-        return [], "Empty command"
+        return [], 'Empty command'
 
-    try:
-        key = get_openai_api_key()
-    except Exception as e:
-        # No API key: fallback to rule parser and return a clear note
-        return rule_parse(text), f"OPENAI_API_KEY missing: {e}"
+    intent, confidence = classify_intent(text)
+    planner = TaskPlanner()
+    plan = planner.plan(text)
 
-    try:
-        openai.api_key = key
-        system = (
-            "You are an assistant that converts a single short natural-language desktop command"
-            " into a JSON array of simple action objects."
-            " Each action must be a JSON object with an 'action' key and optional additional keys"
-            " like 'name', 'text', 'key', 'url', 'path', 'seconds'."
-            " Allowed actions: launch_application, close_application, open_url, open_folder,"
-            " create_folder, type_text, press_key, hotkey, take_screenshot, wait, focus_window."
-            " Return only valid JSON (no surrounding backticks) representing an array of action objects."
-        )
-        user = f"Command: {text}\n\nRespond with the JSON array of actions."
+    if plan and plan != [{'action': 'unknown', 'text': text}]:
+        errors = safety.validate_actions(plan)
+        if not errors:
+            note = f'AI intent: {intent} ({confidence:.2f})' if intent != 'UNKNOWN' else 'AI intent classification used fallback parser'
+            if len(plan) > 1:
+                note += ' — multi-step plan created'
+            return plan, note
 
-        resp = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=0.0,
-            max_tokens=300,
-        )
+    llm_plan = _llm_plan(text)
+    if llm_plan:
+        errors = safety.validate_actions(llm_plan)
+        if not errors:
+            return llm_plan, f'LLM structured plan accepted ({intent})'
 
-        content = resp.choices[0].message["content"].strip()
-        # Try to parse JSON directly
-        try:
-            actions = json.loads(content)
-            if isinstance(actions, list):
-                return actions, ""
-        except Exception:
-            # Attempt to extract JSON substring
-            start = content.find("[")
-            end = content.rfind("]")
-            if start != -1 and end != -1 and end > start:
-                substring = content[start:end+1]
-                try:
-                    actions = json.loads(substring)
-                    if isinstance(actions, list):
-                        return actions, ""
-                except Exception:
-                    pass
-
-        # If parsing fails, fallback
-        return rule_parse(text), "AI response parse failed — used rule-based fallback"
-
-    except Exception as exc:
-        # On any OpenAI error, fallback to rule parser
-        return rule_parse(text), f"OpenAI API error: {exc} — used rule-based fallback"
+    fallback = rule_parse(text)
+    if fallback:
+        return fallback, f'Used safe fallback parser because the AI plan was unavailable or rejected (intent={intent}, confidence={confidence:.2f})'
+    return [], 'No valid action could be parsed from the command.'
